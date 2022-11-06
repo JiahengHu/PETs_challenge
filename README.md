@@ -1,3 +1,7 @@
+# Jeff's Modification
+See the latest commit for modification. Essentially I added the bayesian_inference folder that demonstrated how data can be processed. See comments at make_bayesian_data.py for things I'm not clear. The file can be run by executing the `bayesian.sh` file in `bayesian_inference` folder. 
+
+
 # Introduction
 
 This repository contains example implementations for centralized models for the
