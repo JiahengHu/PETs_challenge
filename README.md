@@ -1,6 +1,8 @@
 # Jeff's Modification
 See the latest commit for modification. Essentially I added the bayesian_inference folder that demonstrated how data can be processed. See comments at make_bayesian_data.py for things I'm not clear. The file can be run by executing the `bayesian.sh` file in `bayesian_inference` folder. 
 
+Note: use igraph version =  0.9.11, otherwise the code wouldn't run.
+
 
 # Introduction
 
