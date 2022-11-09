@@ -45,7 +45,7 @@ def make_si_table(disease_data):
     si_table.rename({"day" : "infected"}, axis=1, inplace=True)
     si_table["recovery"] = recovery_times 
 
-    si_table.set_index(["pid", "infected"], verify_integrity=True, inplace=True)
+    #si_table.set_index(["pid", "infected"], verify_integrity=True, inplace=True)
 
     return si_table
 
@@ -74,20 +74,23 @@ if __name__ == "__main__":
     pop_size = len(last_day_df)
     inf_pop = len(last_day_df.loc[last_day_df["state"] != "S"])
 
+    # ID translation tables
     pid_to_idx = dict()
     idx_to_pid = np.zeros(pop_size, dtype=int)
     for index, row in pop.iterrows():
         pid_to_idx[row['pid']] = index
         idx_to_pid[index] = row['pid']
 
-    transmission_rate =# TODO
-    decay = 0.5**(1/d)    # TODO
+    si_data = make_si_table(disease_data)
+    median_sickness_length = np.nanmedian((si_data['recovery'] - si_data['infected']).to_numpy())
 
-    probs = np.ones(pop_size, 'float32') * 1 / pop_size
+    transmission_rate =0# TODO
+    decay = 0.5**(1/median_sickness_length)
+    print(transmission_rate, decay)
+
+    probs = np.zeros(pop_size, 'float32')   # * 1 / pop_size    We know who starts the outbreak
     contact_matrix2 = np.zeros((pop_size, pop_size), 'float32')
     contact_matrix3 = np.copy(contact_matrix2)
-
-
 
     # Compute recovery rate / transmission rate
     # contacts = pd.read_csv(args.graph_file, chunksize=1024)  # Assumes sorted - it's not going to be
