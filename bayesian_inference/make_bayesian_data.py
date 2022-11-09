@@ -13,6 +13,7 @@ from pickle import load
 
 import pandas as pd
 import numpy as np
+import csv
 
 from igraph import Graph
 
@@ -53,9 +54,9 @@ def make_si_table(disease_data):
 if __name__ == "__main__":
 
     parser = ArgumentParser()
-    parser.add_argument("graph_file", help="edges csv object")
-    parser.add_argument("disease_file", help="disease data")
-    parser.add_argument("pop_file", help="population characteristics file")
+    parser.add_argument("--graph_file", help="edges csv object", default="../sample_data/va_population_network.csv")
+    parser.add_argument("--disease_file", help="disease data", default="../sample_data/va_disease_outcome_training.csv")
+    parser.add_argument("--pop_file", help="population characteristics file", default="../sample_data/va_person.csv")
     # parser.add_argument("out_file", help="output file for data")
     parser.add_argument("--min-date", default=0, type=int, help="Min date to generate data from (used for making evaluation set)")
     parser.add_argument("--is-eval", action="store_true",default=False, help="exclude positive instances (assume input file is training)") 
@@ -67,56 +68,148 @@ if __name__ == "__main__":
 
     pop = pd.read_csv(args.pop_file)
     disease_data = pd.read_csv(args.disease_file)
-    pop.set_index("pid", inplace=True)
 
-
-    #######################################  Start collecting data fields  #################################
-    # TODO: I'm not sure how to obtain the transmission rate - how is it defined? What does the location mean?
-    # Nonetheless, these data should probably be extracted from the following contact graph
-    graph = make_graph(args.graph_file)
-
-    # This is a table which stores all the infection information
-    # At the moment it is not used, but it could be useful
-    si_table = make_si_table(disease_data)
-    disease_unused = si_table[si_table.index.get_level_values("infected") >= (args.min_date - args.past_window)]
-
-    # Process the training data and get the following info related to the last training day: 
     num_of_training_days = 56
     last_day_df = disease_data.loc[disease_data["day"] == num_of_training_days]
+    pop_size = len(last_day_df)
+    inf_pop = len(last_day_df.loc[last_day_df["state"] != "S"])
 
-    # Total population size
-    total_population_size = len(last_day_df)
+    pid_to_idx = dict()
+    idx_to_pid = np.zeros(pop_size, dtype=int)
+    for index, row in pop.iterrows():
+        pid_to_idx[row['pid']] = index
+        idx_to_pid[index] = row['pid']
 
-    # Size of population infected at the end of the training period
-    # Question: should this include "recovered"? Right now it does
-    # Otherwise, switch to: len(last_day_df.loc[last_day_df["state"] == "I"])
-    size_of_infected_at_last_day = len(last_day_df.loc[last_day_df["state"] != "S"]) 
+    transmission_rate =# TODO
+    decay = 0.5**(1/d)    # TODO
 
-    # Person IDs which have not yet been infected at the end of the training period
-    pid_not_infected_at_last_day = last_day_df.loc[last_day_df["state"] == "S"]["pid"].to_numpy()
-
-    # Contact between those IDs for the testing period
-    # Question: do we not care about their contact during training period? Right now we retrieve all contact information
-    # Also, fee free to process the subgraph based on wh
-    subgraph_list = []
-    for ego_pid in pid_not_infected_at_last_day:
-        try:
-            vid = graph.vs.find(name=ego_pid)
-        except:
-            # Some node doesn't have contact
-            print(f"pid {ego_pid} has no contact history")
-            continue
-        neighbors = graph.neighborhood(vid, order=1) # changing the order to get more contacts
-        subgraph = graph.induced_subgraph(neighbors+[vid])
-        subgraph_list.append(subgraph)
-
-        # We can also get information about each edge
-        # Right now only includes duration. We can include more information by modifying the make_graph file
-        for edge in subgraph.es:
-            edge_info = edge["duration"]
+    probs = np.ones(pop_size, 'float32') * 1 / pop_size
+    contact_matrix2 = np.zeros((pop_size, pop_size), 'float32')
+    contact_matrix3 = np.copy(contact_matrix2)
 
 
-    print("From here, we can either store the processed data / directly train model based on the processed data")
-    import ipdb
-    ipdb.set_trace()
-    
+
+    # Compute recovery rate / transmission rate
+    # contacts = pd.read_csv(args.graph_file, chunksize=1024)  # Assumes sorted - it's not going to be
+    # day_start = 0
+    # day = 0
+    # for chunk in contacts:
+    #     for index, row in chunk.iterrows():
+    #         if row['start_time'] > day_start + (24 * 60):  # Day advanced
+    #             day += 1
+    #             day_start = row['start_time']
+
+
+
+
+    # Training data
+    contacts = pd.read_csv(args.graph_file, chunksize=1024)     # Assumes sorted - it's not going to be
+    day_start = 0
+    day = 0
+    for chunk in contacts:
+        for index, row in chunk.iterrows():
+            if row['start_time'] > day_start + (24 * 60):   # Day advanced
+                # Record ground truth infection events
+                last_day_df = disease_data.loc[disease_data["day"] == day]
+                infected = last_day_df.loc[last_day_df["state"] == "I"]["pid"].to_numpy()
+                for i in range(len(infected)):
+                    infected_pid = pid_to_idx[infected[i]]
+                    probs[infected_pid] = 1.0
+                # Similarly record recovered
+                recovered = last_day_df.loc[last_day_df["state"] == "R"]["pid"].to_numpy()
+                for i in range(len(recovered)):
+                    infected_pid = pid_to_idx[recovered[i]]
+                    probs[infected_pid] = 0.0
+
+                # Update infection probabilities
+                np.fill_diagonal(contact_matrix2, 1)
+                np.fill_diagonal(contact_matrix3, 0)
+                new_probs = np.zeros(pop_size, 'float32')
+                for i in range(pop_size):
+                    o1 = np.multiply(probs[i], contact_matrix3[i])
+                    o2 = contact_matrix2[i] - o1
+                    o3 = np.multiply(o2, probs)
+                    o4 = np.subtract([1.], o3)
+                    prod = o4.prod()
+                    new_probs[i] = 1 - prod
+                probs = new_probs
+                probs *= decay
+                contact_matrix2 *= (decay * decay)
+                contact_matrix3 *= (decay * decay * decay)
+
+                # Advance day counter
+                day += 1
+                day_start = row['start_time']
+                print(day, len(infected), len(recovered))
+                print('contacts', np.min(contact_matrix2), np.max(contact_matrix2), np.mean(contact_matrix2))
+                print('probs', np.min(probs), np.max(probs), np.mean(probs))
+                candidates = np.argpartition(probs, -8)[-8:].flatten().tolist()
+                top_inf = dict()
+                for cand in candidates:
+                    top_inf[idx_to_pid[cand]] = probs[cand]
+                print(top_inf)
+
+            # Update contacts
+            pid = pid_to_idx[row['pid1']]
+            cid = pid_to_idx[row['pid2']]
+            duration = row['duration'] / (60 * 24)  # Duration is in min, normalize to contact level over a day
+            contact_increase = 1 - ((1 - transmission_rate) ** duration)
+            inc2 = min(contact_matrix2[pid][cid] + contact_increase, 1)
+            inc3 = min(contact_matrix3[cid][pid] + contact_increase, 1)
+            contact_matrix2[pid][cid] = inc2
+            contact_matrix2[cid][pid] = inc2
+            contact_matrix3[pid][cid] = inc3
+            contact_matrix3[cid][pid] = inc3
+
+    # Replay last 7 days of contact for evaluation
+    contacts = pd.read_csv(args.graph_file, chunksize=1024)
+    day_start = 0
+    day = 0
+    for chunk in contacts:
+        for index, row in chunk.iterrows():
+            if row['start_time'] > day_start + (24 * 60):  # Day advanced
+                # Update infection probabilities
+                if day >= 50:
+                    np.fill_diagonal(contact_matrix2, 1)
+                    np.fill_diagonal(contact_matrix3, 0)
+                    new_probs = np.zeros(pop_size, 'float32')
+                    for i in range(pop_size):
+                        o1 = np.multiply(probs[i], contact_matrix3[i])
+                        o2 = contact_matrix2[i] - o1
+                        o3 = np.multiply(o2, probs)
+                        o4 = np.subtract([1.], o3)
+                        prod = o4.prod()
+                        new_probs[i] = 1 - prod
+                    probs = new_probs
+                    probs *= decay
+                    contact_matrix2 *= (decay * decay)
+                    contact_matrix3 *= (decay * decay * decay)
+
+                # Advance day counter
+                day += 1
+                day_start = row['start_time']
+                if day >= 50:
+                    last_day_df = disease_data.loc[disease_data["day"] == day]
+                    infected = last_day_df.loc[last_day_df["state"] == "I"]["pid"].to_numpy()
+                    recovered = last_day_df.loc[last_day_df["state"] == "R"]["pid"].to_numpy()
+                    print(day+56, len(infected), len(recovered))
+                    print('contacts', np.min(contact_matrix2), np.max(contact_matrix2), np.mean(contact_matrix2))
+                    print('probs', np.min(probs), np.max(probs), np.mean(probs))
+                    candidates = np.argpartition(probs, -18)[-18:].flatten().tolist()
+                    top_inf = dict()
+                    for cand in candidates:
+                        top_inf[idx_to_pid[cand]] = probs[cand]
+                    print(top_inf)
+
+            if day >= 50:
+                # Update contacts
+                pid = pid_to_idx[row['pid1']]
+                cid = pid_to_idx[row['pid2']]
+                duration = row['duration'] / (60 * 24)  # Duration is in min, normalize to contact level over a day
+                contact_increase = 1 - ((1 - transmission_rate) ** duration)
+                inc2 = min(contact_matrix2[pid][cid] + contact_increase, 1)
+                inc3 = min(contact_matrix3[cid][pid] + contact_increase, 1)
+                contact_matrix2[pid][cid] = inc2
+                contact_matrix2[cid][pid] = inc2
+                contact_matrix3[pid][cid] = inc3
+                contact_matrix3[cid][pid] = inc3
