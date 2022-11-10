@@ -18,6 +18,7 @@ import csv
 from igraph import Graph
 
 from make_graph import make_graph
+from sklearn.metrics import average_precision_score
 
 
 def make_si_table(disease_data):
@@ -61,6 +62,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-date", default=0, type=int, help="Min date to generate data from (used for making evaluation set)")
     parser.add_argument("--is-eval", action="store_true",default=False, help="exclude positive instances (assume input file is training)") 
     parser.add_argument("--past-window", default=3, help="How much history to consider for each data point")
+    parser.add_argument("--eval-labels", help="file with evaluation labels", default="../sample_data/va_disease_outcome_target.csv")
     # parser.add_argument("--pid_partition", type=int, help="index of pids partition")
     # parser.add_argument("--n_jobs", type=int, help="total number of jobs")
 
@@ -124,7 +126,8 @@ if __name__ == "__main__":
     contact_matrix3 = np.copy(contact_matrix2)
 
 
-
+    eval_labels = pd.read_csv(args.eval_labels)
+    eval_labels.set_index("pid", inplace=True)
 
 
 
@@ -188,6 +191,9 @@ if __name__ == "__main__":
             contact_matrix3[pid][cid] = inc3
             contact_matrix3[cid][pid] = inc3
 
+
+    max_probs_array = np.zeros(pop_size, 'float32')
+
     # Replay last 7 days of contact for evaluation
     #TODO remove last day infected from the eval prediction
     #TODO find a threshold for number of infected predicted
@@ -229,6 +235,12 @@ if __name__ == "__main__":
                     for cand in candidates:
                         top_inf[idx_to_pid[cand]] = probs[cand]
                     print(top_inf)
+
+                    max_probs_array = np.maximum(probs, max_probs_array)
+                    bi_max_auprc = average_precision_score(eval_labels, max_probs_array)
+                    bi_auprc = average_precision_score(eval_labels, probs)
+                    print(f"\nBayesian inference single day AUPRC {bi_auprc}, Max AUPRC so far {bi_max_auprc}\n")
+
 
             if day >= 50:
                 # Update contacts
