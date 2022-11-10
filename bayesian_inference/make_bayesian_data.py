@@ -81,10 +81,41 @@ if __name__ == "__main__":
         pid_to_idx[row['pid']] = index
         idx_to_pid[index] = row['pid']
 
+    # Compute recovery rate / transmission rate
+    contacts = pd.read_csv(args.graph_file, chunksize=1024)  # Assumes sorted - it's not going to be
+    day_start = 0
+    day = 0
+
+    # infected = disease_data.loc[disease_data["state"] == "I"]["pid"].to_numpy().tolist()
+    # recovered = disease_data.loc[disease_data["state"] == "R"]["pid"].to_numpy().tolist()
+    # infected = infected + recovered
+    # print(infected)
+    # durations = []
+    #
+    # for chunk in contacts:
+    #     for index, row in chunk.iterrows():
+    #         if row['start_time'] > day_start + (24 * 60):  # Day advanced
+    #             day += 1
+    #             day_start = row['start_time']
+    #
+    #             last_day_df = disease_data.loc[disease_data["day"] == day]
+    #
+    #         if row['pid1'] in infected:
+    #             other_guy = row['pid2']
+    #             if other_guy in infected:
+    #                 durations.append(row['duration'])
+    #
+    #         if row['pid2'] in infected:
+    #             other_guy = row['pid1']
+    #             if other_guy in infected:
+    #                 durations.append(row['duration'])
+    # print(durations)
+    transmission_rate = 7.855283239069935e-05*60*24#1 / np.mean(durations)
+
+
     si_data = make_si_table(disease_data)
     median_sickness_length = np.nanmedian((si_data['recovery'] - si_data['infected']).to_numpy())
 
-    transmission_rate =0# TODO
     decay = 0.5**(1/median_sickness_length)
     print(transmission_rate, decay)
 
@@ -92,15 +123,8 @@ if __name__ == "__main__":
     contact_matrix2 = np.zeros((pop_size, pop_size), 'float32')
     contact_matrix3 = np.copy(contact_matrix2)
 
-    # Compute recovery rate / transmission rate
-    # contacts = pd.read_csv(args.graph_file, chunksize=1024)  # Assumes sorted - it's not going to be
-    # day_start = 0
-    # day = 0
-    # for chunk in contacts:
-    #     for index, row in chunk.iterrows():
-    #         if row['start_time'] > day_start + (24 * 60):  # Day advanced
-    #             day += 1
-    #             day_start = row['start_time']
+
+
 
 
 
@@ -165,6 +189,8 @@ if __name__ == "__main__":
             contact_matrix3[cid][pid] = inc3
 
     # Replay last 7 days of contact for evaluation
+    #TODO remove last day infected from the eval prediction
+    #TODO find a threshold for number of infected predicted
     contacts = pd.read_csv(args.graph_file, chunksize=1024)
     day_start = 0
     day = 0
@@ -198,7 +224,7 @@ if __name__ == "__main__":
                     print(day+56, len(infected), len(recovered))
                     print('contacts', np.min(contact_matrix2), np.max(contact_matrix2), np.mean(contact_matrix2))
                     print('probs', np.min(probs), np.max(probs), np.mean(probs))
-                    candidates = np.argpartition(probs, -18)[-18:].flatten().tolist()
+                    candidates = np.argpartition(probs, -40)[-40:].flatten().tolist()
                     top_inf = dict()
                     for cand in candidates:
                         top_inf[idx_to_pid[cand]] = probs[cand]
